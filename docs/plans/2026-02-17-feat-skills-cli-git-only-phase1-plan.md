@@ -291,8 +291,8 @@ export function runGit(args: string[], cwd?: string): Promise<void> {
 - [x] Implement install manifest read/write in `src/state/install-manifest.ts`
 - [x] Add manifest schema version + migration stub in `src/state/manifest-schema.ts`
 - [x] Add command-safe git runner in `src/git/run-git.ts`
-- [ ] Add canonical target-path contract doc in `docs/contracts/install-targets.md`
-- [ ] Add ADR documenting Phase 1 CLI/path contract divergence from PRD in `docs/adr/0001-phase1-cli-contract.md`
+- [x] Add canonical target-path contract doc in `docs/contracts/install-targets.md`
+- [x] Add ADR documenting Phase 1 CLI/path contract divergence from PRD in `docs/adr/0001-phase1-cli-contract.md`
 
 ### Phase 2: Core Commands
 - [x] Implement `add` with pinned commit resolution in `src/commands/add.ts`
@@ -315,7 +315,7 @@ export function runGit(args: string[], cwd?: string): Promise<void> {
 ### Phase 4: Hardening
 - [x] Add failure-mode tests (network/auth/path traversal) in `test/security/*.test.ts`
 - [x] Add telemetry/audit event hooks in `src/audit/events.ts`
-- [ ] Document operator runbook in `docs/runbooks/skills-cli-phase1.md`
+- [x] Document operator runbook in `docs/runbooks/skills-cli-phase1.md`
 - [x] Add concurrent command lock tests in `test/concurrency/*.test.ts`
 - [x] Add rollback simulation tests in `test/reliability/rollback.test.ts`
 - [x] Add target-path smoke tests (all agents, project+user) in `test/e2e/targets-smoke.test.ts`
