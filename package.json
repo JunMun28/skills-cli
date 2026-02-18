@@ -1,0 +1,29 @@
+{
+  "name": "skills",
+  "version": "0.1.0",
+  "description": "Internal skills CLI for installing reusable AI agent skills",
+  "type": "module",
+  "bin": {
+    "skills": "./bin/cli.mjs"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts'"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "prettier": "^3.8.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  }
+}
