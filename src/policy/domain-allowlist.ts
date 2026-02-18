@@ -10,6 +10,8 @@ const DEFAULT_ALLOWED_DOMAINS = [
   'github.com',
   'gitlab.com',
   'bitbucket.org',
+  'skills.sh',
+  'add-skill.vercel.sh',
 ];
 
 let cachedAllowlist: string[] | null = null;

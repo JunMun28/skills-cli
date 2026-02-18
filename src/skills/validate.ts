@@ -2,12 +2,13 @@
  * Skill name/path validation and sanitization.
  */
 
-import { basename, normalize, isAbsolute } from 'node:path';
+import { normalize, isAbsolute } from 'node:path';
 
 // Dangerous file extensions that should not be installed
 const BLOCKED_EXTENSIONS = new Set([
   '.exe', '.dll', '.dylib', '.so', '.bat', '.cmd', '.com',
-  '.msi', '.scr', '.pif', '.vbs', '.js.map',
+  '.msi', '.scr', '.pif', '.vbs', '.js', '.cjs', '.mjs',
+  '.sh', '.py', '.rb', '.pl',
 ]);
 
 // Characters not allowed in skill names
@@ -49,16 +50,29 @@ export function validateSkillName(name: string): ValidationResult {
 
 export function validatePath(path: string): ValidationResult {
   const errors: string[] = [];
-  const normalized = normalize(path);
+  const decodedPath = decodePath(path);
+  const decodedUnix = decodedPath.replace(/\\/g, '/');
+  const decodedSegments = decodedUnix.split('/').filter(Boolean);
+  const normalized = normalize(decodedPath);
+  const normalizedUnix = normalized.replace(/\\/g, '/');
 
   // Block path traversal
-  if (normalized.includes('..')) {
+  if (decodedSegments.includes('..')) {
+    errors.push(`Path traversal detected: "${path}"`);
+  }
+
+  const segments = normalizedUnix.split('/').filter(Boolean);
+  if (!errors.some((error) => error.includes('traversal')) && segments.includes('..')) {
     errors.push(`Path traversal detected: "${path}"`);
   }
 
   // Block absolute paths in subpath context
-  if (isAbsolute(path)) {
+  if (isAbsolute(decodedPath)) {
     errors.push(`Absolute paths not allowed: "${path}"`);
+  }
+
+  if (decodedPath.includes('\0')) {
+    errors.push(`Null byte not allowed in path: "${path}"`);
   }
 
   return { valid: errors.length === 0, errors };
@@ -66,23 +80,17 @@ export function validatePath(path: string): ValidationResult {
 
 export function hasBlockedFileType(filename: string): boolean {
   const lower = filename.toLowerCase();
-  return Array.from(BLOCKED_EXTENSIONS).some((ext) => lower.endsWith(ext));
+  const dotIdx = lower.lastIndexOf('.');
+  if (dotIdx === -1) {
+    return false;
+  }
+  return BLOCKED_EXTENSIONS.has(lower.slice(dotIdx));
 }
 
-export function validateSkillFiles(filenames: string[]): ValidationResult {
-  const errors: string[] = [];
-
-  for (const file of filenames) {
-    if (hasBlockedFileType(file)) {
-      errors.push(`Blocked file type: "${file}"`);
-    }
-
-    const name = basename(file);
-    if (name.startsWith('.') && name !== '.gitkeep') {
-      // Allow .gitkeep but flag other hidden files
-      // (not blocking - just informational)
-    }
+function decodePath(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
   }
-
-  return { valid: errors.length === 0, errors };
 }

@@ -1,13 +1,9 @@
-/**
- * Skill discovery within a cloned/extracted directory.
- *
- * Recursively finds SKILL.md files, parses frontmatter, and returns skill metadata.
- */
-
-import { readFile } from 'node:fs/promises';
-import { join, dirname, basename, relative } from 'node:path';
-import { globSync } from 'node:fs';
-import { readdirSync, statSync } from 'node:fs';
+import { relative, resolve, sep } from 'node:path';
+import { parse as parseYaml } from 'yaml';
+import {
+  discoverSkills as discoverSkillsV2,
+  type DiscoverSkillsOptions,
+} from '../skills.ts';
 
 export interface SkillInfo {
   name: string;
@@ -17,114 +13,41 @@ export interface SkillInfo {
   frontmatter: Record<string, unknown>;
 }
 
-/**
- * Discover skills by finding SKILL.md files.
- * If subpath is provided, only search within that subdirectory.
- */
 export async function discoverSkills(
   rootDir: string,
   subpath?: string,
+  options: DiscoverSkillsOptions = {},
 ): Promise<SkillInfo[]> {
-  const searchDir = subpath ? join(rootDir, subpath) : rootDir;
-  const skillFiles = findSkillFiles(searchDir);
-  const skills: SkillInfo[] = [];
-
-  for (const filePath of skillFiles) {
-    try {
-      const content = await readFile(filePath, 'utf-8');
-      const { frontmatter, body } = parseFrontmatter(content);
-      const dir = dirname(filePath);
-      const name = (frontmatter.name as string) || basename(dir);
-
-      skills.push({
-        name,
-        description: (frontmatter.description as string) || '',
-        path: dir,
-        relativePath: relative(rootDir, dir),
-        frontmatter,
-      });
-    } catch {
-      // Skip unparseable skill files
+  if (subpath) {
+    const root = resolve(rootDir);
+    const target = resolve(rootDir, subpath);
+    if (!(target === root || target.startsWith(`${root}${sep}`))) {
+      throw new Error('Subpath escapes repository root');
     }
   }
-
-  return skills;
+  const skills = await discoverSkillsV2(rootDir, subpath, options);
+  return skills.map((skill) => ({
+    name: skill.name,
+    description: skill.description,
+    path: skill.path,
+    relativePath: relative(rootDir, skill.path),
+    frontmatter: {
+      name: skill.name,
+      description: skill.description,
+      ...(skill.metadata && { metadata: skill.metadata }),
+    },
+  }));
 }
 
-function findSkillFiles(dir: string): string[] {
-  const results: string[] = [];
-
+export function parseFrontmatter(content: string): Record<string, unknown> {
+  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
+  if (!match) return {};
   try {
-    walk(dir, results);
+    const parsed = parseYaml(match[1] ?? '');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
   } catch {
-    // Directory might not exist
+    return {};
   }
-
-  return results;
-}
-
-function walk(dir: string, results: string[]): void {
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-
-  for (const entry of entries) {
-    if (entry === 'node_modules' || entry === '.git') continue;
-
-    const fullPath = join(dir, entry);
-    try {
-      const stat = statSync(fullPath);
-      if (stat.isDirectory()) {
-        walk(fullPath, results);
-      } else if (entry === 'SKILL.md') {
-        results.push(fullPath);
-      }
-    } catch {
-      // Skip inaccessible entries
-    }
-  }
-}
-
-export function parseFrontmatter(content: string): {
-  frontmatter: Record<string, unknown>;
-  body: string;
-} {
-  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-  if (!match) {
-    return { frontmatter: {}, body: content };
-  }
-
-  const yamlBlock = match[1];
-  const body = match[2];
-  const frontmatter: Record<string, unknown> = {};
-
-  // Simple YAML key: value parser (no nested objects needed for SKILL.md)
-  for (const line of yamlBlock.split('\n')) {
-    const colonIdx = line.indexOf(':');
-    if (colonIdx === -1) continue;
-    const key = line.slice(0, colonIdx).trim();
-    let value: string | boolean = line.slice(colonIdx + 1).trim();
-
-    // Handle quoted values
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-
-    // Handle booleans
-    if (value === 'true') {
-      frontmatter[key] = true;
-    } else if (value === 'false') {
-      frontmatter[key] = false;
-    } else {
-      frontmatter[key] = value;
-    }
-  }
-
-  return { frontmatter, body };
 }

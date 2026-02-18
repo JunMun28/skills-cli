@@ -1,88 +1,79 @@
-/**
- * Canonical install target paths for each supported agent.
- *
- * | Agent          | Scope   | Path                              |
- * |----------------|---------|-----------------------------------|
- * | roo            | project | .roo/skills/<skill>               |
- * | roo            | user    | ~/.roo/skills/<skill>             |
- * | copilot        | project | .agents/skills/<skill> (default)  |
- * | copilot        | project | .github/skills/<skill> (compat)   |
- * | copilot        | user    | ~/.copilot/skills/<skill>         |
- * | claude-code    | project | .codex/skills/<skill>             |
- * | claude-code    | user    | ~/.codex/skills/<skill>           |
- */
-
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { agents, detectInstalledAgents as detectInstalledAgentsV2 } from '../agents.ts';
+import type { AgentType } from '../types.ts';
 
-export type AgentName = 'roo' | 'copilot' | 'claude-code';
+export type AgentName = AgentType;
 export type Scope = 'project' | 'user';
 
-export const SUPPORTED_AGENTS: AgentName[] = ['roo', 'copilot', 'claude-code'];
+export const SUPPORTED_AGENTS: AgentName[] = Object.keys(agents) as AgentName[];
+const AGENT_ALIASES: Record<string, AgentName> = {
+  copilot: 'github-copilot',
+};
 
-function home(): string {
-  return process.env.HOME || process.env.USERPROFILE || '~';
+function normalizeAgentName(agent: string): AgentName | null {
+  const lowered = agent.trim().toLowerCase();
+  const aliased = AGENT_ALIASES[lowered] ?? lowered;
+  return SUPPORTED_AGENTS.includes(aliased as AgentName) ? (aliased as AgentName) : null;
 }
 
-/**
- * Returns the install directory for a given agent, scope, and skill name.
- *
- * For copilot project scope:
- * - Returns .github/skills/ if that directory already exists (compatibility)
- * - Returns .agents/skills/ otherwise (default)
- */
-export function getInstallPath(
-  agent: AgentName,
-  scope: Scope,
-  skillName: string,
-): string {
-  const root = getInstallRoot(agent, scope);
-  return join(root, skillName);
+export function getInstallPath(agent: AgentName, scope: Scope, skillName: string): string {
+  return join(getInstallRoot(agent, scope), skillName);
 }
 
 export function getInstallRoot(agent: AgentName, scope: Scope): string {
-  switch (agent) {
-    case 'roo':
-      return scope === 'project'
-        ? join(process.cwd(), '.roo', 'skills')
-        : join(home(), '.roo', 'skills');
-
-    case 'copilot':
-      if (scope === 'project') {
-        // Compatibility: use .github/skills if it already exists
-        const githubPath = join(process.cwd(), '.github', 'skills');
-        if (existsSync(githubPath)) {
-          return githubPath;
-        }
-        return join(process.cwd(), '.agents', 'skills');
-      }
-      return join(home(), '.copilot', 'skills');
-
-    case 'claude-code':
-      return scope === 'project'
-        ? join(process.cwd(), '.codex', 'skills')
-        : join(home(), '.codex', 'skills');
+  const config = agents[agent];
+  if (!config) throw new Error(`Unsupported agent: ${agent}`);
+  if (scope === 'user') {
+    return config.globalSkillsDir ?? join(process.cwd(), config.skillsDir);
   }
+  return join(process.cwd(), config.skillsDir);
 }
 
-/**
- * Returns all scan roots for listing/checking.
- * For copilot project, scans both .agents/skills and .github/skills.
- */
 export function getScanRoots(agent: AgentName, scope: Scope): string[] {
-  if (agent === 'copilot' && scope === 'project') {
-    return [
-      join(process.cwd(), '.agents', 'skills'),
-      join(process.cwd(), '.github', 'skills'),
-    ];
-  }
-  return [getInstallRoot(agent, scope)];
+  const roots = new Set<string>();
+  roots.add(getInstallRoot(agent, scope));
+  const canonical = scope === 'user' ? join(process.env.HOME || '', '.agents', 'skills') : join(process.cwd(), '.agents', 'skills');
+  roots.add(canonical);
+  return [...roots];
 }
 
-export function parseAgentNames(input: string | undefined): AgentName[] {
-  if (!input) return SUPPORTED_AGENTS;
-  return input
-    .split(',')
-    .map((a) => a.trim().toLowerCase())
-    .filter((a): a is AgentName => SUPPORTED_AGENTS.includes(a as AgentName));
+export interface ParsedAgentSelection {
+  agents: AgentName[];
+  invalid: string[];
+}
+
+export function parseAgentSelection(input: string | string[] | undefined): ParsedAgentSelection {
+  if (!input || (Array.isArray(input) && input.length === 0)) {
+    return { agents: SUPPORTED_AGENTS, invalid: [] };
+  }
+
+  const tokens = Array.isArray(input)
+    ? input.flatMap((part) => part.split(','))
+    : input.split(',');
+  const selected = new Set<AgentName>();
+  const invalid: string[] = [];
+
+  for (const tokenRaw of tokens) {
+    const token = tokenRaw.trim().toLowerCase();
+    if (!token) continue;
+    if (token === '*') {
+      return { agents: SUPPORTED_AGENTS, invalid: [] };
+    }
+    const normalized = normalizeAgentName(token);
+    if (normalized) {
+      selected.add(normalized);
+    } else {
+      invalid.push(tokenRaw.trim());
+    }
+  }
+
+  return { agents: [...selected], invalid };
+}
+
+export function parseAgentNames(input: string | string[] | undefined): AgentName[] {
+  return parseAgentSelection(input).agents;
+}
+
+export async function detectInstalledAgents(): Promise<AgentName[]> {
+  return detectInstalledAgentsV2();
 }

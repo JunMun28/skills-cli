@@ -3,7 +3,6 @@ import {
   validateSkillName,
   validatePath,
   hasBlockedFileType,
-  validateSkillFiles,
 } from '../../src/skills/validate.js';
 
 describe('validateSkillName', () => {
@@ -54,6 +53,7 @@ describe('validatePath', () => {
   it('rejects path traversal', () => {
     expect(validatePath('../../../etc/passwd').valid).toBe(false);
     expect(validatePath('skills/../../../etc').valid).toBe(false);
+    expect(validatePath('%2f..%2f..%2fetc').valid).toBe(false);
   });
 
   it('rejects absolute paths', () => {
@@ -76,19 +76,13 @@ describe('hasBlockedFileType', () => {
     expect(hasBlockedFileType('config.json')).toBe(false);
   });
 
+  it('blocks script extensions', () => {
+    expect(hasBlockedFileType('script.js')).toBe(true);
+    expect(hasBlockedFileType('run.sh')).toBe(true);
+    expect(hasBlockedFileType('tool.py')).toBe(true);
+  });
+
   it('is case-insensitive', () => {
     expect(hasBlockedFileType('MALWARE.EXE')).toBe(true);
-  });
-});
-
-describe('validateSkillFiles', () => {
-  it('passes clean files', () => {
-    expect(validateSkillFiles(['SKILL.md', 'helper.ts']).valid).toBe(true);
-  });
-
-  it('fails on blocked files', () => {
-    const result = validateSkillFiles(['SKILL.md', 'payload.exe']);
-    expect(result.valid).toBe(false);
-    expect(result.errors).toHaveLength(1);
   });
 });

@@ -12,8 +12,8 @@ Code in `src/install/targets.ts` implements this contract.
 | `copilot` | project | `.agents/skills/<skill-name>` | Default write target |
 | `copilot` | project | `.github/skills/<skill-name>` | Compatibility: used when `.github/skills/` pre-exists |
 | `copilot` | user | `~/.copilot/skills/<skill-name>` | User home directory |
-| `claude-code` | project | `.codex/skills/<skill-name>` | Relative to project root (cwd) |
-| `claude-code` | user | `~/.codex/skills/<skill-name>` | User home directory |
+| `claude-code` | project | `.claude/skills/<skill-name>` | Relative to project root (cwd) |
+| `claude-code` | user | `~/.claude/skills/<skill-name>` | User home directory |
 
 ## Rules
 

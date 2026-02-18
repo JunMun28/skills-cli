@@ -34,12 +34,24 @@ function cacheKey(url: string, ref?: string): string {
 export async function cloneToCache(
   url: string,
   ref?: string,
+  expectedCommit?: string,
 ): Promise<string> {
   const dir = cacheDir();
   const key = cacheKey(url, ref);
   const repoDir = join(dir, key);
 
   if (existsSync(join(repoDir, '.git'))) {
+    if (expectedCommit) {
+      try {
+        const localHead = await resolveCommit(repoDir);
+        if (localHead === expectedCommit) {
+          return repoDir;
+        }
+      } catch {
+        // Fallback to fetch/reclone path below.
+      }
+    }
+
     // Existing cache: fetch latest
     try {
       await runGit(['fetch', '--depth', '1', 'origin', ref || 'HEAD'], { cwd: repoDir });
@@ -82,18 +94,11 @@ export async function lsRemote(
     // Output format: <sha>\t<ref>
     const line = output.split('\n')[0];
     if (line) {
-      const sha = line.split('\t')[0];
+      const sha = line.split('\t')[0]?.trim();
       return sha || null;
     }
     return null;
   } catch {
     return null;
-  }
-}
-
-export async function cleanCache(): Promise<void> {
-  const dir = cacheDir();
-  if (existsSync(dir)) {
-    await rm(dir, { recursive: true, force: true });
   }
 }

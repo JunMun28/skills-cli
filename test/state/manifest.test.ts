@@ -67,10 +67,10 @@ describe('manifest-schema', () => {
       expect(migrateManifest(m)).toEqual(m);
     });
 
-    it('resets unknown version', () => {
-      const result = migrateManifest({ schema_version: 99, skills: {} });
-      expect(result.schema_version).toBe(MANIFEST_SCHEMA_VERSION);
-      expect(result.skills).toEqual({});
+    it('throws for future schema versions', () => {
+      expect(() =>
+        migrateManifest({ schema_version: 99, skills: {} }),
+      ).toThrow('Manifest schema version 99 is newer than supported version');
     });
   });
 });
@@ -163,7 +163,6 @@ function makeEntry(name: string): ManifestEntry {
     scope: 'project',
     managed_root: `/tmp/test/${name}`,
     installed_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 }

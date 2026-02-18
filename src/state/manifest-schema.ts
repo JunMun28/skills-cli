@@ -17,13 +17,24 @@ export interface ManifestEntry {
   scope: 'project' | 'user';
   managed_root: string;
   installed_at: string;
-  created_at: string;
   updated_at: string;
 }
 
 export interface Manifest {
   schema_version: number;
   skills: Record<string, ManifestEntry>;
+}
+
+export class ManifestSchemaVersionError extends Error {
+  readonly version: number;
+
+  constructor(version: number) {
+    super(
+      `Manifest schema version ${version} is newer than supported version ${MANIFEST_SCHEMA_VERSION}. Upgrade skills CLI.`,
+    );
+    this.name = 'ManifestSchemaVersionError';
+    this.version = version;
+  }
 }
 
 export function createEmptyManifest(): Manifest {
@@ -61,13 +72,27 @@ export function validateManifest(data: unknown): string[] {
       continue;
     }
     const e = entry as Record<string, unknown>;
-    if (!e.install_id) errors.push(`skills["${key}"] missing install_id`);
-    if (!e.managed_root) errors.push(`skills["${key}"] missing managed_root`);
-    if (!e.source_url) errors.push(`skills["${key}"] missing source_url`);
-    if (!e.resolved_commit) errors.push(`skills["${key}"] missing resolved_commit`);
-    if (!e.skill_name) errors.push(`skills["${key}"] missing skill_name`);
-    if (!e.agent) errors.push(`skills["${key}"] missing agent`);
-    if (!e.scope) errors.push(`skills["${key}"] missing scope`);
+    if (typeof e.install_id !== 'string' || !e.install_id) {
+      errors.push(`skills["${key}"] missing install_id`);
+    }
+    if (typeof e.managed_root !== 'string' || !e.managed_root) {
+      errors.push(`skills["${key}"] missing managed_root`);
+    }
+    if (typeof e.source_url !== 'string' || !e.source_url) {
+      errors.push(`skills["${key}"] missing source_url`);
+    }
+    if (typeof e.resolved_commit !== 'string' || !e.resolved_commit) {
+      errors.push(`skills["${key}"] missing resolved_commit`);
+    }
+    if (typeof e.skill_name !== 'string' || !e.skill_name) {
+      errors.push(`skills["${key}"] missing skill_name`);
+    }
+    if (typeof e.agent !== 'string' || !e.agent) {
+      errors.push(`skills["${key}"] missing agent`);
+    }
+    if (e.scope !== 'project' && e.scope !== 'user') {
+      errors.push(`skills["${key}"] missing scope`);
+    }
   }
 
   return errors;
@@ -80,12 +105,20 @@ export function migrateManifest(data: unknown): Manifest {
   }
 
   const obj = data as Record<string, unknown>;
+  const schemaVersion = obj.schema_version;
+  if (typeof schemaVersion !== 'number') {
+    return createEmptyManifest();
+  }
 
   // Currently only version 1 exists
-  if (obj.schema_version === MANIFEST_SCHEMA_VERSION) {
+  if (schemaVersion === MANIFEST_SCHEMA_VERSION) {
     return data as Manifest;
   }
 
-  // Unknown version - start fresh
+  if (schemaVersion > MANIFEST_SCHEMA_VERSION) {
+    throw new ManifestSchemaVersionError(schemaVersion);
+  }
+
+  // Older version unsupported for now.
   return createEmptyManifest();
 }

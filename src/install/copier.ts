@@ -4,7 +4,7 @@
  * Uses a staged approach: copy to temp dir first, then move to final location.
  */
 
-import { cp, mkdir, rm, rename, readdir, stat } from 'node:fs/promises';
+import { cp, mkdir, rm, rename, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -33,7 +33,7 @@ export async function copySkill(
   try {
     // Stage: copy to temp
     await mkdir(stagingDir, { recursive: true });
-    await cp(sourcePath, stagingDir, { recursive: true });
+    await cp(sourcePath, stagingDir, { recursive: true, dereference: false });
 
     // Validate staged files
     const files = await listFilesRecursive(stagingDir);
@@ -83,16 +83,20 @@ export async function copySkill(
 
 async function listFilesRecursive(dir: string): Promise<string[]> {
   const results: string[] = [];
-  const entries = await readdir(dir);
+  const entries = await readdir(dir, { withFileTypes: true });
 
   for (const entry of entries) {
-    const fullPath = join(dir, entry);
-    const s = await stat(fullPath);
-    if (s.isDirectory()) {
+    const fullPath = join(dir, entry.name);
+
+    if (entry.isSymbolicLink()) {
+      throw new Error(`Symlinks not allowed in skill packages: ${fullPath}`);
+    }
+
+    if (entry.isDirectory()) {
       const subFiles = await listFilesRecursive(fullPath);
       results.push(...subFiles);
     } else {
-      results.push(entry);
+      results.push(fullPath);
     }
   }
 

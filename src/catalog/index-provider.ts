@@ -7,21 +7,26 @@
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CatalogEntry } from '../commands/find.js';
+import { createHash } from 'node:crypto';
+import { parseCatalogJson, type CatalogEntry } from './types.js';
 
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+export const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function getCacheDir(): string {
   const home = process.env.HOME || process.env.USERPROFILE || '~';
   return join(home, '.cache', 'skills', 'catalog');
 }
 
-function getCachePath(): string {
-  return join(getCacheDir(), 'index.json');
+function getCacheKey(catalogUrl: string): string {
+  return createHash('sha256').update(catalogUrl).digest('hex').slice(0, 16);
 }
 
-export async function isCacheStale(): Promise<boolean> {
-  const cachePath = getCachePath();
+export function getCachePath(catalogUrl: string): string {
+  return join(getCacheDir(), `${getCacheKey(catalogUrl)}.json`);
+}
+
+export async function isCacheStale(catalogUrl: string): Promise<boolean> {
+  const cachePath = getCachePath(catalogUrl);
   if (!existsSync(cachePath)) return true;
 
   try {
@@ -32,21 +37,24 @@ export async function isCacheStale(): Promise<boolean> {
   }
 }
 
-export async function writeCatalogCache(entries: CatalogEntry[]): Promise<void> {
+export async function writeCatalogCache(
+  catalogUrl: string,
+  entries: CatalogEntry[],
+): Promise<void> {
   const cacheDir = getCacheDir();
   if (!existsSync(cacheDir)) {
     await mkdir(cacheDir, { recursive: true });
   }
-  await writeFile(getCachePath(), JSON.stringify(entries, null, 2), 'utf-8');
+  await writeFile(getCachePath(catalogUrl), JSON.stringify(entries, null, 2), 'utf-8');
 }
 
-export async function readCatalogCache(): Promise<CatalogEntry[] | null> {
-  const cachePath = getCachePath();
+export async function readCatalogCache(catalogUrl: string): Promise<CatalogEntry[] | null> {
+  const cachePath = getCachePath(catalogUrl);
   if (!existsSync(cachePath)) return null;
 
   try {
     const raw = await readFile(cachePath, 'utf-8');
-    return JSON.parse(raw) as CatalogEntry[];
+    return parseCatalogJson(raw);
   } catch {
     return null;
   }

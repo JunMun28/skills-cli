@@ -34,16 +34,11 @@ describe('concurrent manifest operations', () => {
       addToManifest('project', makeEntry(`skill-${i}`)),
     );
 
-    // Note: these run serially because addToManifest reads-then-writes.
-    // In a real concurrent scenario we'd need locking.
-    // This test verifies the API doesn't throw under sequential stress.
     await Promise.all(promises);
 
     const manifest = await readManifest('project');
-    // Due to sequential read-write nature, not all may be present
-    // but at minimum the manifest should be valid and non-corrupted
     const count = Object.keys(manifest.skills).length;
-    expect(count).toBeGreaterThan(0);
+    expect(count).toBe(10);
     expect(manifest.schema_version).toBe(1);
   });
 
@@ -71,7 +66,6 @@ function makeEntry(name: string): ManifestEntry {
     scope: 'project',
     managed_root: `/tmp/test/${name}`,
     installed_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 }

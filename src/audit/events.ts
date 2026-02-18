@@ -8,7 +8,8 @@
 
 import { appendFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
 
 export type AuditEventType =
   | 'skill.add'
@@ -64,15 +65,57 @@ export async function emitAuditEvent(
 
   // Write to audit log file if configured
   const logPath = process.env.SKILLS_AUDIT_LOG;
-  if (logPath) {
+  const resolvedLogPath = logPath ? resolveAuditLogPath(logPath) : null;
+  if (resolvedLogPath) {
     try {
-      const dir = dirname(logPath);
+      const dir = dirname(resolvedLogPath);
       if (!existsSync(dir)) {
         await mkdir(dir, { recursive: true });
       }
-      await appendFile(logPath, JSON.stringify(event) + '\n', 'utf-8');
+      await appendFile(resolvedLogPath, JSON.stringify(event) + '\n', 'utf-8');
     } catch {
       // Don't fail on audit log write errors
     }
   }
+}
+
+function resolveAuditLogPath(path: string): string | null {
+  if (!isAbsolute(path)) {
+    return null;
+  }
+
+  if (path.split(/[\\/]/).includes('..')) {
+    return null;
+  }
+
+  const resolvedPath = resolve(path);
+  const allowedRoots = getAllowedAuditRoots();
+  if (!allowedRoots.some((root) => isWithinRoot(resolvedPath, root))) {
+    return null;
+  }
+
+  return resolvedPath;
+}
+
+function getAllowedAuditRoots(): string[] {
+  const roots = new Set<string>();
+  const home = process.env.HOME || process.env.USERPROFILE;
+  if (home) {
+    roots.add(resolve(home));
+  }
+  roots.add(resolve(tmpdir()));
+
+  const configured = process.env.SKILLS_AUDIT_LOG_DIR;
+  if (configured && isAbsolute(configured)) {
+    roots.add(resolve(configured));
+  }
+
+  return [...roots];
+}
+
+function isWithinRoot(path: string, root: string): boolean {
+  if (path === root) {
+    return true;
+  }
+  return path.startsWith(`${root}${sep}`);
 }

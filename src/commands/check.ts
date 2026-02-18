@@ -16,7 +16,8 @@ import { existsSync } from 'node:fs';
 import { readManifest } from '../state/install-manifest.js';
 import { isDomainAllowed } from '../policy/domain-allowlist.js';
 import { lsRemote } from '../git/cache.js';
-import { parseAgentNames, type AgentName } from '../install/targets.js';
+import { parseAgentSelection, type AgentName } from '../install/targets.js';
+import { emitAuditEvent } from '../audit/events.js';
 
 export type CheckStatus =
   | 'valid'
@@ -39,60 +40,93 @@ export interface CheckResult {
 interface CheckOptions {
   global?: boolean;
   agent?: string;
+  json?: boolean;
 }
 
-export async function checkCommand(options: CheckOptions): Promise<void> {
+export async function checkCommand(options: CheckOptions): Promise<number> {
   const scope = options.global ? 'user' : 'project';
-  const agents = parseAgentNames(options.agent);
+  const { agents, invalid } = parseAgentSelection(options.agent);
+  if (invalid.length > 0) {
+    console.error(`Unknown agents: ${invalid.join(', ')}`);
+    return 1;
+  }
 
   const manifest = await readManifest(scope);
   const entries = Object.entries(manifest.skills);
 
   if (entries.length === 0) {
-    console.log(`No skills installed (${scope} scope).`);
-    return;
+    if (options.json) {
+      process.stdout.write('[]\n');
+    } else {
+      console.log(`No skills installed (${scope} scope).`);
+    }
+    return 0;
   }
 
-  const results: CheckResult[] = [];
-
-  for (const [key, entry] of entries) {
-    if (!agents.includes(entry.agent as AgentName)) continue;
-
-    const result = await checkEntry(key, entry);
-    results.push(result);
-  }
-
-  if (results.length === 0) {
-    console.log('No matching entries to check.');
-    return;
-  }
-
-  // Print results
-  const statusIcon: Record<CheckStatus, string> = {
-    valid: '✓',
-    outdated: '↑',
-    policy_violation: '⚠',
-    unreachable: '?',
-    orphaned_ref: '⚠',
-    missing: '✗',
+  const remoteCache = new Map<string, Promise<string | null>>();
+  const getRemoteCommit = (url: string, ref: string): Promise<string | null> => {
+    const key = `${url}::${ref}`;
+    if (!remoteCache.has(key)) {
+      remoteCache.set(key, lsRemote(url, ref));
+    }
+    return remoteCache.get(key)!;
   };
 
-  console.log(`\nCheck results (${scope} scope):\n`);
-
-  for (const r of results) {
-    console.log(`  ${statusIcon[r.status]} ${r.skillName} (${r.agent}): ${r.status}`);
-    if (r.detail) {
-      console.log(`    ${r.detail}`);
+  const results: CheckResult[] = [];
+  const checks: Promise<CheckResult>[] = [];
+  for (const [key, entry] of entries) {
+    if (agents.includes(entry.agent as AgentName)) {
+      checks.push(checkEntry(key, entry, getRemoteCommit));
     }
   }
+  results.push(...await Promise.all(checks));
+
+  if (results.length === 0) {
+    if (options.json) {
+      process.stdout.write('[]\n');
+    } else {
+      console.log('No matching entries to check.');
+    }
+    return 0;
+  }
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
+  } else {
+    // Print results
+    const statusIcon: Record<CheckStatus, string> = {
+      valid: '✓',
+      outdated: '↑',
+      policy_violation: '⚠',
+      unreachable: '?',
+      orphaned_ref: '⚠',
+      missing: '✗',
+    };
+
+    console.log(`\nCheck results (${scope} scope):\n`);
+
+    for (const r of results) {
+      console.log(`  ${statusIcon[r.status]} ${r.skillName} (${r.agent}): ${r.status}`);
+      if (r.detail) {
+        console.log(`    ${r.detail}`);
+      }
+    }
+
+    const valid = results.filter((r) => r.status === 'valid').length;
+    const issues = results.length - valid;
+    console.log(`\n${valid} valid, ${issues} issue(s) found.`);
+  }
+  await emitAuditEvent('skill.check', {
+    scope,
+    checked: results.length,
+  });
 
   const valid = results.filter((r) => r.status === 'valid').length;
   const issues = results.length - valid;
-  console.log(`\n${valid} valid, ${issues} issue(s) found.`);
-
   if (issues > 0) {
-    process.exit(1);
+    return 1;
   }
+  return 0;
 }
 
 async function checkEntry(
@@ -105,6 +139,7 @@ async function checkEntry(
     ref: string | undefined;
     managed_root: string;
   },
+  getRemoteCommit: (url: string, ref: string) => Promise<string | null> = lsRemote,
 ): Promise<CheckResult> {
   const base = {
     key,
@@ -129,12 +164,12 @@ async function checkEntry(
 
   // 3. Check remote reachability and ref status
   const ref = entry.ref || 'HEAD';
-  const remoteCommit = await lsRemote(entry.source_url, ref);
+  const remoteCommit = await getRemoteCommit(entry.source_url, ref);
 
   if (remoteCommit === null) {
     // Try HEAD as fallback if specific ref failed
     if (ref !== 'HEAD') {
-      const headCommit = await lsRemote(entry.source_url, 'HEAD');
+      const headCommit = await getRemoteCommit(entry.source_url, 'HEAD');
       if (headCommit === null) {
         return { ...base, status: 'unreachable', detail: 'Cannot reach remote repository' };
       }

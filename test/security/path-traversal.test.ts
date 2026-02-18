@@ -9,6 +9,7 @@ describe('path traversal prevention', () => {
     'skills/../../../etc/shadow',
     './../../.ssh/id_rsa',
     'a/b/../../../../../../etc/hosts',
+    '%2F..%2F..%2Fetc',
   ];
 
   for (const attempt of traversalAttempts) {

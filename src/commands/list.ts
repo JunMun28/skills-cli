@@ -5,24 +5,38 @@
  */
 
 import { existsSync } from 'node:fs';
-import { readManifest, getManifestPath } from '../state/install-manifest.js';
-import { parseAgentNames, SUPPORTED_AGENTS, type AgentName } from '../install/targets.js';
+import { readManifest } from '../state/install-manifest.js';
+import {
+  parseAgentSelection,
+  type AgentName,
+} from '../install/targets.js';
 
 interface ListOptions {
   global?: boolean;
   agent?: string;
+  json?: boolean;
 }
 
-export async function listCommand(options: ListOptions): Promise<void> {
+export async function listCommand(options: ListOptions): Promise<number> {
   const scope = options.global ? 'user' : 'project';
-  const agents = parseAgentNames(options.agent);
+  const { agents, invalid } = parseAgentSelection(options.agent);
+  if (invalid.length > 0) {
+    console.error(`Unknown agents: ${invalid.join(', ')}`);
+    return 1;
+  }
 
   const manifest = await readManifest(scope);
   const entries = Object.values(manifest.skills);
+  const filtered = entries.filter((entry) => agents.includes(entry.agent as AgentName));
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(filtered, null, 2)}\n`);
+    return 0;
+  }
 
   if (entries.length === 0) {
     console.log(`No skills installed (${scope} scope).`);
-    return;
+    return 0;
   }
 
   // Group by agent
@@ -36,7 +50,7 @@ export async function listCommand(options: ListOptions): Promise<void> {
 
   if (byAgent.size === 0) {
     console.log(`No skills found for specified agents (${scope} scope).`);
-    return;
+    return 0;
   }
 
   console.log(`\nInstalled skills (${scope} scope):\n`);
@@ -51,4 +65,6 @@ export async function listCommand(options: ListOptions): Promise<void> {
     }
     console.log();
   }
+
+  return 0;
 }

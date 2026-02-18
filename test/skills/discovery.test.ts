@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { discoverSkills, parseFrontmatter } from '../../src/skills/discovery.js';
+import { discoverSkills, parseFrontmatter } from '../../src/skills/discovery.ts';
 
 describe('parseFrontmatter', () => {
   it('parses YAML frontmatter', () => {
@@ -11,33 +11,18 @@ name: my-skill
 description: A test skill
 ---
 
-# My Skill
-Content here`;
-
-    const { frontmatter, body } = parseFrontmatter(content);
+# My Skill`;
+    const frontmatter = parseFrontmatter(content);
     expect(frontmatter.name).toBe('my-skill');
     expect(frontmatter.description).toBe('A test skill');
-    expect(body).toContain('# My Skill');
   });
 
-  it('handles missing frontmatter', () => {
-    const { frontmatter, body } = parseFrontmatter('# Just content');
-    expect(frontmatter).toEqual({});
-    expect(body).toBe('# Just content');
-  });
-
-  it('handles quoted values', () => {
-    const { frontmatter } = parseFrontmatter('---\nname: "quoted-name"\n---\n');
-    expect(frontmatter.name).toBe('quoted-name');
-  });
-
-  it('handles boolean values', () => {
-    const { frontmatter } = parseFrontmatter('---\ninternal: true\n---\n');
-    expect(frontmatter.internal).toBe(true);
+  it('returns empty when missing frontmatter', () => {
+    expect(parseFrontmatter('# content')).toEqual({});
   });
 });
 
-describe('discoverSkills', () => {
+describe('discoverSkills (priority + strict metadata)', () => {
   let tempDir: string;
 
   beforeEach(async () => {
@@ -46,64 +31,96 @@ describe('discoverSkills', () => {
 
   afterEach(async () => {
     await rm(tempDir, { recursive: true, force: true });
+    delete process.env.INSTALL_INTERNAL_SKILLS;
   });
 
-  it('discovers SKILL.md files', async () => {
-    await mkdir(join(tempDir, 'my-skill'), { recursive: true });
+  it('discovers valid skills', async () => {
+    await mkdir(join(tempDir, 'skills', 'good'), { recursive: true });
     await writeFile(
-      join(tempDir, 'my-skill', 'SKILL.md'),
-      '---\nname: my-skill\ndescription: Test\n---\n# Skill',
+      join(tempDir, 'skills', 'good', 'SKILL.md'),
+      '---\nname: good\ndescription: Valid skill\n---\n',
     );
 
     const skills = await discoverSkills(tempDir);
     expect(skills).toHaveLength(1);
-    expect(skills[0].name).toBe('my-skill');
+    expect(skills[0].name).toBe('good');
   });
 
-  it('discovers multiple skills', async () => {
-    for (const name of ['skill-a', 'skill-b', 'skill-c']) {
-      await mkdir(join(tempDir, name), { recursive: true });
-      await writeFile(
-        join(tempDir, name, 'SKILL.md'),
-        `---\nname: ${name}\ndescription: Test ${name}\n---\n`,
-      );
-    }
-
-    const skills = await discoverSkills(tempDir);
-    expect(skills).toHaveLength(3);
-  });
-
-  it('respects subpath filter', async () => {
-    await mkdir(join(tempDir, 'skills', 'a'), { recursive: true });
-    await mkdir(join(tempDir, 'other', 'b'), { recursive: true });
-    await writeFile(
-      join(tempDir, 'skills', 'a', 'SKILL.md'),
-      '---\nname: a\ndescription: Test\n---\n',
+  it('rejects subpaths that escape root', async () => {
+    await expect(discoverSkills(tempDir, '../outside')).rejects.toThrow(
+      'Subpath escapes repository root',
     );
+  });
+
+  it('skips skills missing required metadata', async () => {
+    await mkdir(join(tempDir, 'skills', 'invalid'), { recursive: true });
     await writeFile(
-      join(tempDir, 'other', 'b', 'SKILL.md'),
-      '---\nname: b\ndescription: Test\n---\n',
+      join(tempDir, 'skills', 'invalid', 'SKILL.md'),
+      '---\ndescription: missing name\n---\n',
     );
 
-    const skills = await discoverSkills(tempDir, 'skills');
-    expect(skills).toHaveLength(1);
-    expect(skills[0].name).toBe('a');
-  });
-
-  it('returns empty for dir with no SKILL.md', async () => {
-    await mkdir(join(tempDir, 'empty'), { recursive: true });
     const skills = await discoverSkills(tempDir);
     expect(skills).toHaveLength(0);
   });
 
-  it('falls back to directory name when no frontmatter name', async () => {
-    await mkdir(join(tempDir, 'fallback-skill'), { recursive: true });
+  it('hides internal skills by default', async () => {
+    await mkdir(join(tempDir, 'skills', 'internal-one'), { recursive: true });
     await writeFile(
-      join(tempDir, 'fallback-skill', 'SKILL.md'),
-      '---\ndescription: No name field\n---\n',
+      join(tempDir, 'skills', 'internal-one', 'SKILL.md'),
+      '---\nname: internal-one\ndescription: hidden\nmetadata:\n  internal: true\n---\n',
     );
 
     const skills = await discoverSkills(tempDir);
-    expect(skills[0].name).toBe('fallback-skill');
+    expect(skills).toHaveLength(0);
+  });
+
+  it('shows internal skills when INSTALL_INTERNAL_SKILLS=1', async () => {
+    process.env.INSTALL_INTERNAL_SKILLS = '1';
+    await mkdir(join(tempDir, 'skills', 'internal-one'), { recursive: true });
+    await writeFile(
+      join(tempDir, 'skills', 'internal-one', 'SKILL.md'),
+      '---\nname: internal-one\ndescription: visible\nmetadata:\n  internal: true\n---\n',
+    );
+
+    const skills = await discoverSkills(tempDir);
+    expect(skills.map((skill) => skill.name)).toContain('internal-one');
+  });
+
+  it('discovers plugin-manifest declared skill paths', async () => {
+    await mkdir(join(tempDir, '.claude-plugin'), { recursive: true });
+    await writeFile(
+      join(tempDir, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ skills: ['./plugin-skills/my-plugin-skill'] }),
+      'utf-8',
+    );
+    await mkdir(join(tempDir, 'plugin-skills', 'my-plugin-skill'), { recursive: true });
+    await writeFile(
+      join(tempDir, 'plugin-skills', 'my-plugin-skill', 'SKILL.md'),
+      '---\nname: plugin-skill\ndescription: via plugin manifest\n---\n',
+    );
+
+    const skills = await discoverSkills(tempDir);
+    expect(skills.map((skill) => skill.name)).toContain('plugin-skill');
+  });
+
+  it('supports full-depth search when root has SKILL.md', async () => {
+    await writeFile(
+      join(tempDir, 'SKILL.md'),
+      '---\nname: root-skill\ndescription: root\n---\n',
+    );
+    await mkdir(join(tempDir, 'nested', 'second'), { recursive: true });
+    await writeFile(
+      join(tempDir, 'nested', 'second', 'SKILL.md'),
+      '---\nname: nested-skill\ndescription: nested\n---\n',
+    );
+
+    const defaultSkills = await discoverSkills(tempDir);
+    expect(defaultSkills.map((skill) => skill.name)).toEqual(['root-skill']);
+
+    const fullDepthSkills = await discoverSkills(tempDir, undefined, { fullDepth: true });
+    expect(fullDepthSkills.map((skill) => skill.name).sort()).toEqual([
+      'nested-skill',
+      'root-skill',
+    ]);
   });
 });

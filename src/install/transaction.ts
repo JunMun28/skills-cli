@@ -5,10 +5,7 @@
  * before committing them to the filesystem.
  */
 
-import { mkdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { tmpdir } from 'node:os';
+import { rm } from 'node:fs/promises';
 import { copySkill, type CopyResult } from './copier.js';
 
 export interface InstallStep {

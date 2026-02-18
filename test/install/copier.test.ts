@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readFile, symlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -73,6 +73,17 @@ describe('copySkill', () => {
     expect(result.error).toContain('Blocked file type');
   });
 
+  it('blocks dangerous file types in nested directories', async () => {
+    await mkdir(join(sourceDir, 'nested'), { recursive: true });
+    await writeFile(join(sourceDir, 'SKILL.md'), '# Test');
+    await writeFile(join(sourceDir, 'nested', 'payload.exe'), 'malware');
+
+    const result = await copySkill(sourceDir, targetDir);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('nested');
+    expect(result.error).toContain('payload.exe');
+  });
+
   it('copies subdirectories', async () => {
     await mkdir(join(sourceDir, 'sub'), { recursive: true });
     await writeFile(join(sourceDir, 'SKILL.md'), '# Test');
@@ -81,5 +92,14 @@ describe('copySkill', () => {
     const result = await copySkill(sourceDir, targetDir);
     expect(result.success).toBe(true);
     expect(existsSync(join(targetDir, 'sub', 'util.ts'))).toBe(true);
+  });
+
+  it('rejects symlinks', async () => {
+    await writeFile(join(sourceDir, 'SKILL.md'), '# Test');
+    await symlink('/etc/passwd', join(sourceDir, 'link.txt'));
+
+    const result = await copySkill(sourceDir, targetDir);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Symlinks not allowed');
   });
 });
